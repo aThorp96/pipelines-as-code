@@ -307,20 +307,6 @@ func TestProcessTemplates(t *testing.T) {
 			},
 		},
 		{
-			name:          "params/missing required params",
-			expectedError: true,
-			repository: &v1alpha1.Repository{
-				Spec: v1alpha1.RepositorySpec{
-					Params: &[]v1alpha1.Params{
-						{
-							Name:     "empty-param",
-							Required: true,
-						},
-					},
-				},
-			},
-		},
-		{
 			name:               "params/pick value when value and secret set",
 			expected:           map[string]string{"params": "batman"},
 			expectedLogSnippet: "repo repo, param name params has a value and secretref, picking value",

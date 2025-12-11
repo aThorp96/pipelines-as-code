@@ -564,23 +564,38 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 			}
 		}
 	case triggertype.Push:
-		pushChanges, _, err := v.Client().Commits.GetCommitDiff(v.sourceProjectID, runevent.SHA, &gitlab.GetCommitDiffOptions{})
-		if err != nil {
-			return changedfiles.ChangedFiles{}, err
-		}
-		for _, change := range pushChanges {
-			changedFiles.All = append(changedFiles.All, change.NewPath)
-			if change.NewFile {
-				changedFiles.Added = append(changedFiles.Added, change.NewPath)
+		options := gitlab.GetCommitDiffOptions{}
+		pageOpts := []gitlab.RequestOptionFunc{}
+
+		for {
+			pushChanges, resp, err := v.Client().Commits.GetCommitDiff(v.sourceProjectID, runevent.SHA, &options, pageOpts...)
+			if err != nil {
+				return changedfiles.ChangedFiles{}, err
 			}
-			if change.DeletedFile {
-				changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
+
+			for _, change := range pushChanges {
+				changedFiles.All = append(changedFiles.All, change.NewPath)
+				if change.NewFile {
+					changedFiles.Added = append(changedFiles.Added, change.NewPath)
+				}
+				if change.DeletedFile {
+					changedFiles.Deleted = append(changedFiles.Deleted, change.NewPath)
+				}
+				if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
+					changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
+				}
+				if change.RenamedFile {
+					changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
+				}
 			}
-			if !change.RenamedFile && !change.DeletedFile && !change.NewFile {
-				changedFiles.Modified = append(changedFiles.Modified, change.NewPath)
+
+			if resp.NextLink == "" {
+				// Exit the loop when we've seen all pages.
+				break
 			}
-			if change.RenamedFile {
-				changedFiles.Renamed = append(changedFiles.Renamed, change.NewPath)
+			// Otherwise, set param to query the next page
+			pageOpts = []gitlab.RequestOptionFunc{
+				gitlab.WithKeysetPaginationParameters(resp.NextLink),
 			}
 		}
 	default:

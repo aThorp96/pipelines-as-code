@@ -68,6 +68,10 @@ type Provider struct {
 	cachedChangedFiles *changedfiles.ChangedFiles
 }
 
+var defaultGitlabListOptions = gitlab.ListOptions{
+	PerPage: 100,
+}
+
 func (v *Provider) Client() *gitlab.Client {
 	providerMetrics.RecordAPIUsage(
 		v.Logger,
@@ -99,23 +103,32 @@ func (v *Provider) CreateComment(_ context.Context, event *info.Event, commit, u
 
 	// List comments of the merge request
 	if updateMarker != "" {
-		comments, _, err := v.Client().Notes.ListMergeRequestNotes(event.TargetProjectID, event.PullRequestNumber, &gitlab.ListMergeRequestNotesOptions{
-			ListOptions: gitlab.ListOptions{
-				Page:    1,
-				PerPage: 100,
-			},
-		})
-		if err != nil {
-			return err
-		}
+		options := []gitlab.RequestOptionFunc{}
 
-		re := regexp.MustCompile(updateMarker)
-		for _, comment := range comments {
-			if re.MatchString(comment.Body) {
-				_, _, err := v.Client().Notes.UpdateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, comment.ID, &gitlab.UpdateMergeRequestNoteOptions{
-					Body: &commit,
-				})
+		for {
+			comments, resp, err := v.Client().Notes.ListMergeRequestNotes(event.TargetProjectID, event.PullRequestNumber, &gitlab.ListMergeRequestNotesOptions{ListOptions: defaultGitlabListOptions}, options...)
+			if err != nil {
 				return err
+			}
+
+			re := regexp.MustCompile(updateMarker)
+			for _, comment := range comments {
+				if re.MatchString(comment.Body) {
+					_, _, err := v.Client().Notes.UpdateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, comment.ID, &gitlab.UpdateMergeRequestNoteOptions{
+						Body: &commit,
+					})
+					return err
+				}
+			}
+
+			// Exit the loop when we've seen all pages.
+			if resp.NextLink == "" {
+				break
+			}
+
+			// Otherwise, set param to query the next page
+			options = []gitlab.RequestOptionFunc{
+				gitlab.WithKeysetPaginationParameters(resp.NextLink),
 			}
 		}
 	}
@@ -386,7 +399,7 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 		ListOptions: gitlab.ListOptions{
 			OrderBy:    "id",
 			Pagination: "keyset",
-			PerPage:    20,
+			PerPage:    defaultGitlabListOptions.PerPage,
 			Sort:       "asc",
 		},
 	}
@@ -524,7 +537,7 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 			ListOptions: gitlab.ListOptions{
 				OrderBy:    "id",
 				Pagination: "keyset",
-				PerPage:    20,
+				PerPage:    defaultGitlabListOptions.PerPage,
 				Sort:       "asc",
 			},
 		}
@@ -564,7 +577,7 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 			}
 		}
 	case triggertype.Push:
-		options := gitlab.GetCommitDiffOptions{}
+		options := gitlab.GetCommitDiffOptions{ListOptions: defaultGitlabListOptions}
 		pageOpts := []gitlab.RequestOptionFunc{}
 
 		for {
